@@ -1,0 +1,181 @@
+---
+title: "RCR power example"
+output: 
+  html_document:
+    code_folding: hide
+date: "2024-04-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(ggbeeswarm)
+  library(ggsci)
+  library(patchwork)
+  library(MASS)
+  library(emmeans)
+  library(PASSED)
+  library(data.table)
+})
+
+
+plotting_function = function(df){
+  p.violin = ggplot(df,aes(x = Group,y=Count,color=Group)) + 
+  geom_violin() +
+  theme_bw(15) +
+  scale_color_nejm()+
+  theme(axis.text.x = element_text(angle=45,hjust=1))+
+  xlab("")
+
+p.classic = ggplot(df,aes(x = Group,y=Count,fill=Group)) + 
+  stat_summary(geom = "bar", fun = mean, position = "dodge") +
+  stat_summary(geom = "errorbar", 
+               fun.max = function(x) mean(x) + sd(x),
+               fun.min = function(x) mean(x) - sd(x),
+               position = "dodge",color="black",width = 0.25) +
+  theme_bw(15) +
+  scale_color_nejm() +
+  scale_fill_nejm()+
+  theme(axis.text.x = element_text(angle=45,hjust=1))+
+  xlab("")
+
+
+p.box = ggplot(df,aes(x = Group,y=Count,color=Group)) + 
+  geom_boxplot() + 
+  theme_bw(15) +
+  scale_color_nejm()+
+  theme(axis.text.x = element_text(angle=45,hjust=1))+
+  xlab("")
+
+p.swarm = ggplot(df,aes(x = Group,y=Count,color=Group)) + 
+  geom_quasirandom() + 
+  stat_summary(geom = "errorbar", 
+               fun.max = function(x) mean(x),
+               fun.min = function(x) mean(x),
+               position = "dodge",color="black",width = 1,linewidth=2) +
+  stat_summary(geom = "errorbar", 
+               fun.max = function(x) mean(x) + sd(x),
+               fun.min = function(x) mean(x) - sd(x),
+               position = "dodge",color="black",width = 0.25) +
+  theme_bw(15) +
+  scale_color_nejm()+
+  theme(axis.text.x = element_text(angle=45,hjust=1))+
+  xlab("")
+
+print(p.classic + p.violin + p.box +p.swarm +plot_layout(ncol = 4))
+
+}
+
+```
+
+# Live example {.tabset}
+## What we the population data look like
+
+```{r, fig.height=5,fig.width=21}
+n = 500
+
+#Example?
+df.large.sample = data.frame(Group =  rep(c("Negative control","Positive control","Experimental group"),each=n),
+                    Count = c(rnbinom(n, mu = 1000,size=8), #The neg contorl should have
+                              rnbinom(n, mu = 500,size=8), #The pos contorl should have
+                              rnbinom(n, mu = 800,size=8)) #The exp group should have
+                    )
+
+df.large.sample$Group = factor(df.large.sample$Group,levels=c("Negative control","Positive control","Experimental group"))
+
+plotting_function(df.large.sample)
+
+```
+
+
+## How many samples do we normally draw?
+
+```{r, fig.height=5,fig.width=21}
+
+set.seed(777)
+sample.size = 8
+
+df.sample = data.frame(Group =  rep(c("Negative control","Positive control","Experimental group"),each=sample.size),
+                    Count = c(rnbinom(sample.size, mu = 1000,size=5), #The neg control should have
+                              rnbinom(sample.size, mu = 500,size=5), #The pos control should have
+                              rnbinom(sample.size, mu = 800,size=5)) #The exp group should have
+                    )
+
+df.sample$Group = factor(df.sample$Group,levels=c("Negative control","Positive control","Experimental group"))
+
+plotting_function(df.sample)
+
+fit = glm.nb(Count~Group,data=df.sample)
+emmeans(fit,pairwise~Group)$contrasts
+
+```
+
+
+## But this is just one sample, what if we took 100 samples?
+
+
+```{r, fig.height=5,fig.width=15}
+
+
+get_sample_and_estimates = function(x){
+  df.sample = data.frame(Group =  rep(c("Negative control","Positive control","Experimental group"),each=sample.size),
+                      Count = c(rnbinom(sample.size, mu = 1000,size=5), #The neg contorl should have
+                                rnbinom(sample.size, mu = 500,size=5), #The pos contorl should have
+                                rnbinom(sample.size, mu = 800,size=5)) #The exp group should have
+                      )
+  
+  df.sample$Group = factor(df.sample$Group,levels=c("Negative control","Positive control","Experimental group"))
+  
+  fit = glm.nb(Count~Group,data=df.sample)
+  return(as.data.frame(emmeans(fit,pairwise~Group)$contrasts[3,]))
+}
+
+many.samples = rbindlist(lapply(1:100,get_sample_and_estimates))
+many.samples$Number = 1:nrow(many.samples)
+many.samples$Significant = ifelse(many.samples$p.value < 0.05,"Significant","NS")
+p.effects = ggplot(many.samples,aes(x = Number, y = estimate,color=Significant)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = estimate - 1.96*SE,ymax = estimate + 1.96*SE))+
+  scale_color_manual(values = c("NS" = "black","Significant" = "Red"))+
+  theme_bw(15) + 
+  geom_hline(color="grey",aes(yintercept = 0,linetype="Null hypothesis"),linewidth=2)+
+  scale_linetype_manual(values = "dashed")
+  
+p.power = ggplot(many.samples[many.samples$Significant == "Significant",],aes(x =  Significant,fill=Significant)) + 
+  geom_bar(aes(y = after_stat(count))) +
+  theme_bw(15) +
+  scale_fill_manual(values = c("NS" = "black","Significant" = "Red")) +
+  xlab("") +
+  geom_text(stat='count', aes(label=..count..), vjust=-1)
+
+p.effects + p.power +plot_layout(widths=c(6,1))
+
+```
+
+
+## Power vs sample size
+
+
+```{r}
+
+
+df.power = data.frame( SS = 2:20, Power = sapply(2:20,function(ss) power_NegativeBinomial(n1 = ss, power = NULL,sig.level = 0.05, mu1 = 500, mu2=800, theta= 8 )$power))
+
+ggplot(df.power,aes(x=SS,y=Power  )) + 
+  geom_point() + 
+  theme_bw(15) +
+  geom_line() +
+  geom_hline(aes(yintercept = 0.8,linetype = "80%",color="80%")) +
+  geom_hline(aes(yintercept = 0.9,linetype = "90%",color="90%")) +
+  scale_linetype_manual(values=c("dotted","dashed")) + 
+  scale_color_nejm()
+
+```
+
+
+
+
+
