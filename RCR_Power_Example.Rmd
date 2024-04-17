@@ -7,8 +7,7 @@ date: "2024-04-12"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-
+knitr::opts_chunk$set(echo = TRUE,warnings=FALSE, errors=FALSE)
 
 suppressPackageStartupMessages({
   library(ggplot2)
@@ -19,6 +18,9 @@ suppressPackageStartupMessages({
   library(emmeans)
   library(PASSED)
   library(data.table)
+  library(MASS)
+  library(table1)
+  library(parallel)
 })
 
 
@@ -28,7 +30,7 @@ plotting_function = function(df){
   theme_bw(15) +
   scale_color_nejm()+
   theme(axis.text.x = element_text(angle=45,hjust=1))+
-  xlab("")
+  xlab("")+theme(legend.position = "none")
 
 p.classic = ggplot(df,aes(x = Group,y=Count,fill=Group)) + 
   stat_summary(geom = "bar", fun = mean, position = "dodge") +
@@ -40,15 +42,16 @@ p.classic = ggplot(df,aes(x = Group,y=Count,fill=Group)) +
   scale_color_nejm() +
   scale_fill_nejm()+
   theme(axis.text.x = element_text(angle=45,hjust=1))+
-  xlab("")
+  xlab("")+theme(legend.position = "none")
 
 
 p.box = ggplot(df,aes(x = Group,y=Count,color=Group)) + 
-  geom_boxplot() + 
   theme_bw(15) +
+  geom_jitter(width=0.25,height=0,alpha=0.55) +
+  geom_boxplot(color="black", fill=NA) +
   scale_color_nejm()+
   theme(axis.text.x = element_text(angle=45,hjust=1))+
-  xlab("")
+  xlab("")+theme(legend.position = "none")
 
 p.swarm = ggplot(df,aes(x = Group,y=Count,color=Group)) + 
   geom_quasirandom() + 
@@ -63,48 +66,86 @@ p.swarm = ggplot(df,aes(x = Group,y=Count,color=Group)) +
   theme_bw(15) +
   scale_color_nejm()+
   theme(axis.text.x = element_text(angle=45,hjust=1))+
-  xlab("")
+  xlab("") +theme(legend.position = "none")
 
-print(p.classic + p.violin + p.box +p.swarm +plot_layout(ncol = 4))
-
+print(p.classic + p.violin + p.box +p.swarm +plot_layout(ncol = 2))
 }
 
 ```
 
 # Live example {.tabset}
-## What we the population data look like
+## Let's mad lib an experiment
 
-```{r, fig.height=5,fig.width=21}
-n = 500
+```{r, fig.height=10,fig.width=10}
+sample.size = 1000
 
+groups = c("Negative Control", "Positive Control", "Experimental Group")
+mean_counts = c(1000,500,750)
+
+set.seed(321)
 #Example?
-df.large.sample = data.frame(Group =  rep(c("Negative control","Positive control","Experimental group"),each=n),
-                    Count = c(rnbinom(n, mu = 1000,size=8), #The neg contorl should have
-                              rnbinom(n, mu = 500,size=8), #The pos contorl should have
-                              rnbinom(n, mu = 800,size=8)) #The exp group should have
+df.large.sample = data.frame(Group =  rep(groups,each=sample.size),
+                    Count = c(rnegbin(sample.size, mu = mean_counts[1],theta=3), #The neg control should have
+                              rnegbin(sample.size, mu = mean_counts[2],theta=3), #The pos control should have
+                              rnegbin(sample.size, mu = mean_counts[3],theta=3)) #The exp group should have
                     )
 
-df.large.sample$Group = factor(df.large.sample$Group,levels=c("Negative control","Positive control","Experimental group"))
+df.large.sample$Group = factor(df.large.sample$Group,levels=groups)
 
-plotting_function(df.large.sample)
+plotting_function(df.large.sample) 
+
+```
+
+
+
+
+
+```{r}
+
+## What is the false positive rate for anova vs negative binomial?
+# false_positive = function(x){
+# sample.size = 8
+# df.sample = data.frame(Group =  c(rep("Negative control",sample.size),rep("Positive control",sample.size),rep("Experimental group",sample.size)),
+#                     Count = c(rnegbin(sample.size, mu = 1000,theta=3), #The neg control should have
+#                               rnegbin(sample.size, mu = 100,theta=3), #The pos control should have
+#                               rnegbin(sample.size, mu = 925,theta=3)) #The exp group should have
+#                     )
+# 
+# df.sample$Group = factor(df.sample$Group,levels=groups)
+# 
+# 
+# fit.aov = aov(Count~Group,data=df.sample)
+# p.aov = data.frame(emmeans(fit.aov,pairwise~Group)$contrasts)[2,]$p.value
+# 
+# fit.nb = glm.nb(Count~Group,data=df.sample)
+# p.nb = data.frame(emmeans(fit.nb,pairwise~Group)$contrasts)[2,]$p.value
+# 
+# return(data.frame(p = c(p.aov,p.nb), Test = c("ANOVA","Negative Binomial")))
+# 
+# }
+# 
+total_cores <- floor(parallel::detectCores()*.95)
+# fp.df = rbindlist(mclapply(1:5000,function(x) false_positive(x), mc.cores = total_cores))
+# fp.df$Significant = ifelse(fp.df$p < 0.05, "False positive","p > 0.05")
+# table1(~Significant|Test,fp.df,overall = NULL)
+# 
 
 ```
 
 
 ## How many samples do we normally draw?
 
-```{r, fig.height=5,fig.width=21}
+```{r, fig.height=10,fig.width=10}
 
 set.seed(777)
 sample.size = 8
-
-df.sample = data.frame(Group =  rep(c("Negative control","Positive control","Experimental group"),each=sample.size),
-                    Count = c(rnbinom(sample.size, mu = 1000,size=5), #The neg control should have
-                              rnbinom(sample.size, mu = 500,size=5), #The pos control should have
-                              rnbinom(sample.size, mu = 800,size=5)) #The exp group should have
+df.sample = data.frame(Group =  rep(groups,each = sample.size),
+                    Count = c(rnegbin(sample.size, mu = mean_counts[1],theta=3), #The neg control should have
+                              rnegbin(sample.size, mu = mean_counts[2],theta=3), #The pos control should have
+                              rnegbin(sample.size, mu = mean_counts[3],theta=3)) #The exp group should have
                     )
 
-df.sample$Group = factor(df.sample$Group,levels=c("Negative control","Positive control","Experimental group"))
+df.sample$Group = factor(df.sample$Group,levels=groups)
 
 plotting_function(df.sample)
 
@@ -116,24 +157,22 @@ emmeans(fit,pairwise~Group)$contrasts
 
 ## But this is just one sample, what if we took 100 samples?
 
-
-```{r, fig.height=5,fig.width=15}
-
+```{r, fig.height=10,fig.width=18}
 
 get_sample_and_estimates = function(x){
-  df.sample = data.frame(Group =  rep(c("Negative control","Positive control","Experimental group"),each=sample.size),
-                      Count = c(rnbinom(sample.size, mu = 1000,size=5), #The neg contorl should have
-                                rnbinom(sample.size, mu = 500,size=5), #The pos contorl should have
-                                rnbinom(sample.size, mu = 800,size=5)) #The exp group should have
-                      )
+  df.sample = data.frame(Group =  rep(groups,each = sample.size),
+                    Count = c(rnegbin(sample.size, mu = mean_counts[1],theta=3), #The neg control should have
+                              rnegbin(sample.size, mu = mean_counts[2],theta=3), #The pos control should have
+                              rnegbin(sample.size, mu = mean_counts[3],theta=3)) #The exp group should have
+                    )
   
-  df.sample$Group = factor(df.sample$Group,levels=c("Negative control","Positive control","Experimental group"))
+  df.sample$Group = factor(df.sample$Group,levels=groups)
   
   fit = glm.nb(Count~Group,data=df.sample)
   return(as.data.frame(emmeans(fit,pairwise~Group)$contrasts[3,]))
 }
 
-many.samples = rbindlist(lapply(1:100,get_sample_and_estimates))
+many.samples = rbindlist(mclapply(1:100,get_sample_and_estimates,mc.cores = total_cores))
 many.samples$Number = 1:nrow(many.samples)
 many.samples$Significant = ifelse(many.samples$p.value < 0.05,"Significant","NS")
 p.effects = ggplot(many.samples,aes(x = Number, y = estimate,color=Significant)) + 
@@ -142,7 +181,10 @@ p.effects = ggplot(many.samples,aes(x = Number, y = estimate,color=Significant))
   scale_color_manual(values = c("NS" = "black","Significant" = "Red"))+
   theme_bw(15) + 
   geom_hline(color="grey",aes(yintercept = 0,linetype="Null hypothesis"),linewidth=2)+
-  scale_linetype_manual(values = "dashed")
+  geom_hline(color="blue",aes(yintercept = -0.3,linetype="True difference"),linewidth=2)+
+  scale_linetype_manual(values = c("dashed","dotted"))+
+  xlab("Sample number")+
+  ylab("log(fold-change)")
   
 p.power = ggplot(many.samples[many.samples$Significant == "Significant",],aes(x =  Significant,fill=Significant)) + 
   geom_bar(aes(y = after_stat(count))) +
@@ -161,17 +203,17 @@ p.effects + p.power +plot_layout(widths=c(6,1))
 
 ```{r}
 
-
-df.power = data.frame( SS = 2:20, Power = sapply(2:20,function(ss) power_NegativeBinomial(n1 = ss, power = NULL,sig.level = 0.05, mu1 = 500, mu2=800, theta= 8 )$power))
+df.power = data.frame( SS = 2:75, Power = sapply(2:75,function(ss) power_NegativeBinomial(n1 = ss, power = NULL,sig.level = 0.05/3, mu1 = mean_counts[2], mu2=mean_counts[3], theta= 3 )$power))
 
 ggplot(df.power,aes(x=SS,y=Power  )) + 
   geom_point() + 
   theme_bw(15) +
   geom_line() +
-  geom_hline(aes(yintercept = 0.8,linetype = "80%",color="80%")) +
-  geom_hline(aes(yintercept = 0.9,linetype = "90%",color="90%")) +
-  scale_linetype_manual(values=c("dotted","dashed")) + 
-  scale_color_nejm()
+  geom_hline(aes(yintercept = 0.8,color="80% Power"),linetype="dashed") +
+  geom_hline(aes(yintercept = 0.9,color="90% Power"),linetype="dotted") +
+  scale_color_nejm()+
+  xlab("Samples per group")+
+  theme(legend.title = element_blank())
 
 ```
 
